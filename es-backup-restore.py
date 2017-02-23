@@ -29,8 +29,10 @@ def info_main():
    print ""
 
 def es_write_log(loglevel,logmsg):
+    # logging.basicConfig(filename='Elasticsearch-backup-restore.log',level=logging.DEBUG)
+    # logging.debug(arg)
     FORMAT = '%(asctime)s - %(name)s - [%(process)d] - %(levelname)s - %(message)s'
-    logging.basicConfig(filename='Elasticsearch-backup-restore.log', format=FORMAT)
+    logging.basicConfig(format=FORMAT)
     logger = logging.getLogger(socket.gethostname())
     logger.setLevel(logging.DEBUG)
     if loglevel == "debug":
@@ -106,7 +108,16 @@ def do_restore(host, port, fileConfig):
         rdRepo = json.loads(configRepo.read())
         rdSnapIndecs = json.loads(configSnapIndecs.read())
 
+        GTM_APPS_ES_FILE_RESTORE = rdMain['GTM_APPS_ES_REPONAME']+"_"+datetime.now().strftime("%Y%m%d")+".tar.gz"
+
         s3 = boto3.client('s3', aws_access_key_id=rdMain['GTM_APPS_ES_S3_ACCESS_KEY'],aws_secret_access_key=rdMain['GTM_APPS_ES_S3_SECRET_KEY'])
+
+        es_write_log("info", "Download file backup to aws S3 ...")
+        s3.download_file(rdMain['GTM_APPS_ES_S3_BUCKET'], GTM_APPS_ES_FILE_RESTORE , rdMain['GTM_APPS_ES_BACKUPDIR']+"/"+GTM_APPS_ES_FILE_RESTORE)
+        es_write_log("info", "Downloading S3 done ...")
+
+        es_write_log("info", "Trying to extract snapshots ...")
+        check_call(["sudo", "tar", "-xf",rdMain['GTM_APPS_ES_BACKUPDIR']+"/"+rdMain['GTM_APPS_ES_REPONAME']+"_"+datetime.now().strftime("%Y%m%d")+".tar.gz", "-P"])
 
         es = Elasticsearch([{'host': host, 'port': port, 'timeout': 500}])
 
@@ -114,16 +125,11 @@ def do_restore(host, port, fileConfig):
         cleanAll = es.indices.delete(index='_all')
         regRepo = es.snapshot.create_repository(repository=rdMain['GTM_APPS_ES_REPONAME'], body=json.dumps(rdRepo))
         try:
-            es_write_log("info", "Download file backup to aws S3 ...")
-            s3.download_file(rdMain['GTM_APPS_ES_S3_BUCKET'], rdMain['GTM_APPS_ES_FILE_RESTORE'], rdMain['GTM_APPS_ES_BACKUPDIR']+"/"+rdMain['GTM_APPS_ES_FILE_RESTORE'])
-            es_write_log("info", "Downloading S3 done ...")
-            es_write_log("info", "Trying to extract snapshots ...")
-            check_call(["sudo", "tar", "-xf",rdMain['GTM_APPS_ES_BACKUPDIR']+"/"+rdMain['GTM_APPS_ES_FILE_RESTORE'], "-P"])
             es_write_log("info","Trying to restore snapshots ...")
             es.snapshot.restore(repository=rdMain['GTM_APPS_ES_REPONAME'], snapshot=rdMain['GTM_APPS_ES_SNAPNAME'], body=json.dumps(rdSnapIndecs), wait_for_completion=True)
             es_write_log("info", "Restore snapshots done")
             es_write_log("info", "Remove local download file")
-            check_call(["sudo", "rm", "-f",rdMain['GTM_APPS_ES_BACKUPDIR']+"/"+rdMain['GTM_APPS_ES_FILE_RESTORE']])
+            check_call(["sudo", "rm", "-f",rdMain['GTM_APPS_ES_BACKUPDIR']+"/"+GTM_APPS_ES_FILE_RESTORE])
             es_write_log("info", "Service restore Stopped ...")
 
         except Exception as e:
