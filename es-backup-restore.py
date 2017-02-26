@@ -9,7 +9,7 @@ from subprocess import *
 GTM_APPS_ES_VERSION = '1.0'
 GTM_APPS_ES_HOST = ''
 GTM_APPS_ES_PORT = ''
-GTM_CONFIG_INI = ''
+GTM_APPS_ES_CONF = ''
 
 SG_DO_ES_CONF = False
 SG_DO_ES_HOST = False
