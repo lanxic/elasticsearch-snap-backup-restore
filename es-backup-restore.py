@@ -9,7 +9,7 @@ from subprocess import *
 GTM_APPS_ES_VERSION = '1.0'
 GTM_APPS_ES_HOST = ''
 GTM_APPS_ES_PORT = ''
-GTM_APPS_ES_CONF = ''
+GTM_CONFIG_INI = ''
 
 SG_DO_ES_CONF = False
 SG_DO_ES_HOST = False
@@ -32,7 +32,7 @@ def es_write_log(loglevel,logmsg):
     # logging.basicConfig(filename='Elasticsearch-backup-restore.log',level=logging.DEBUG)
     # logging.debug(arg)
     FORMAT = '%(asctime)s - %(name)s - [%(process)d] - %(levelname)s - %(message)s'
-    logging.basicConfig(format=FORMAT)
+    logging.basicConfig(filename='Elasticsearch-backup-restore.log', format=FORMAT)
     logger = logging.getLogger(socket.gethostname())
     logger.setLevel(logging.DEBUG)
     if loglevel == "debug":
@@ -121,8 +121,10 @@ def do_restore(host, port, fileConfig):
 
         es = Elasticsearch([{'host': host, 'port': port, 'timeout': 500}])
 
-        es_write_log("info","Trying to clean index ...")
-        cleanAll = es.indices.delete(index='_all')
+        indx = ['news','promotion_suggestions','coupon_suggestions','store_details','stores','store_suggestions','malls','promotions','coupons','activities','news_suggestions','mall_suggestions']
+        for x in indx:
+            es_write_log("info","Trying to clean index ... "+x)
+            cleanAll = es.indices.delete(index=x)
         regRepo = es.snapshot.create_repository(repository=rdMain['GTM_APPS_ES_REPONAME'], body=json.dumps(rdRepo))
         try:
             es_write_log("info","Trying to restore snapshots ...")

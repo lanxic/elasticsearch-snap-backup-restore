@@ -1,3 +1,5 @@
 {
-  "indices": "*"
+  "indices": "news,promotion_suggestions,coupon_suggestions,store_details,stores,store_suggestions,malls,promotions,coupons,activities,news_suggestions,mall_suggestions",
+  "ignore_unavailable": true,
+  "include_global_state": false
 }
