@@ -15,6 +15,11 @@ How to use
 
 Find at my document technical in **[elasticsearc backup and restore](https://www.lanxic.my.id/elasticsearch-backup-restore/)** page.
 
+update
+------
+
+-	fix check_file on s3 wait until ready
+
 Feedback & Bug Report
 ---------------------
 
