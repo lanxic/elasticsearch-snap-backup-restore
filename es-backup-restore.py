@@ -1,12 +1,13 @@
 #!/usr/bin/python
 import os
-import sys, socket, io, json, getopt
+import sys, socket, io, json, getopt, time
 import requests, logging, boto3
 from datetime import datetime
 from elasticsearch import Elasticsearch
 from subprocess import *
 
-GTM_APPS_ES_VERSION = '1.0'
+
+GTM_APPS_ES_VERSION = '1.1'
 GTM_APPS_ES_HOST = ''
 GTM_APPS_ES_PORT = ''
 GTM_CONFIG_INI = ''
@@ -14,6 +15,8 @@ GTM_CONFIG_INI = ''
 SG_DO_ES_CONF = False
 SG_DO_ES_HOST = False
 SG_DO_ES_PORT = False
+
+fb_File = None
 
 def info_main():
    print "Usage: %s [OPTIONS]" % os.path.basename(sys.argv[0])
@@ -28,11 +31,19 @@ def info_main():
    print('-v            Print the version')
    print ""
 
+def check_file(aws_access_key_id,aws_secret_access_key,bucket):
+    s3 = boto3.client('s3', aws_access_key_id=aws_access_key_id,aws_secret_access_key=aws_secret_access_key)
+    listBucket = s3.list_objects(Bucket=bucket)
+    files3Bucket = {}
+    for object in listBucket["Contents"]:
+        files3Bucket.update(object)
+    fb_File = files3Bucket['Key']
+    return fb_File
+
 def es_write_log(loglevel,logmsg):
-    # logging.basicConfig(filename='Elasticsearch-backup-restore.log',level=logging.DEBUG)
+    logging.basicConfig(filename='Elasticsearch-backup-restore.log',level=logging.DEBUG)
     # logging.debug(arg)
     FORMAT = '%(asctime)s - %(name)s - [%(process)d] - %(levelname)s - %(message)s'
-    logging.basicConfig(filename='Elasticsearch-backup-restore.log', format=FORMAT)
     logger = logging.getLogger(socket.gethostname())
     logger.setLevel(logging.DEBUG)
     if loglevel == "debug":
@@ -59,9 +70,14 @@ def do_backup(host, port, fileConfig):
         rdSnapIndecs = json.loads(configSnapIndecs.read())
         # print rdMain['datadir']
 
+        getFileBackup = rdMain['GTM_APPS_ES_REPONAME']+"_"+datetime.now().strftime("%Y%m%d")+".tar.gz"
+
         s3 = boto3.client('s3', aws_access_key_id=rdMain['GTM_APPS_ES_S3_ACCESS_KEY'],aws_secret_access_key=rdMain['GTM_APPS_ES_S3_SECRET_KEY'])
 
-        es = Elasticsearch([{'host': host, 'port': port, 'timeout': 500}])
+        es_write_log("info", "remove old file backup to aws S3 ..."+getFileBackup)
+        s3.delete_object(Bucket=rdMain['GTM_APPS_ES_S3_BUCKET'],Key=getFileBackup)
+
+        es = Elasticsearch([{'host': host, 'port': port, 'timeout': 1000}])
         # print(es.info())
         regRepo = es.snapshot.create_repository(repository=rdMain['GTM_APPS_ES_REPONAME'], body=json.dumps(rdRepo))
         # checkRegRepo = regRepo['acknowledged']
@@ -74,12 +90,13 @@ def do_backup(host, port, fileConfig):
 
         except Exception as e:
             try:
-                getFileBackup = rdMain['GTM_APPS_ES_REPONAME']+"_"+datetime.now().strftime("%Y%m%d")+".tar.gz"
                 es_write_log("info", "Create snapshots ...")
                 es.snapshot.create(repository=rdMain['GTM_APPS_ES_REPONAME'], snapshot=rdMain['GTM_APPS_ES_SNAPNAME'], body=json.dumps(rdSnapIndecs), wait_for_completion=True)
                 es_write_log("info", "Trying to compress snapshots ...")
                 check_call(["tar", "-czf",rdMain['GTM_APPS_ES_BACKUPDIR']+"/"+rdMain['GTM_APPS_ES_REPONAME']+"_"+datetime.now().strftime("%Y%m%d")+".tar.gz", "/var/elasticsearch/snapshot", "-P"])
                 es_write_log("info", "Compress snapshots done ... file: "+rdMain['GTM_APPS_ES_BACKUPDIR']+"/"+getFileBackup)
+                es_write_log("info", "remove old file backup to aws S3 ...")
+                s3.delete_object(Bucket=rdMain['GTM_APPS_ES_S3_BUCKET'],Key=rdMain['GTM_APPS_ES_REPONAME']+"_"+datetime.now().strftime("%Y%m%d")+".tar.gz")
                 es_write_log("info", "Upload file backup to aws S3 ...")
                 s3.upload_file(rdMain['GTM_APPS_ES_BACKUPDIR']+"/"+getFileBackup, rdMain['GTM_APPS_ES_S3_BUCKET'], getFileBackup)
                 es_write_log("info", "Uploading S3 done ...")
@@ -112,6 +129,24 @@ def do_restore(host, port, fileConfig):
 
         s3 = boto3.client('s3', aws_access_key_id=rdMain['GTM_APPS_ES_S3_ACCESS_KEY'],aws_secret_access_key=rdMain['GTM_APPS_ES_S3_SECRET_KEY'])
 
+        """Checks if the files are ready.
+        For a file to be ready it must exist and can be opened in append
+        mode.
+        """
+        es_write_log("info", "Checking file backup to aws S3 ...")
+
+        filesTarget = rdMain['GTM_APPS_ES_REPONAME']+"_"+datetime.now().strftime("%Y%m%d")+".tar.gz"
+        wait_time = 5
+        x = False
+
+        # # If the file doesn't exist, wait wait_time seconds and try again
+        # # until it's found.
+        while not x:
+            # print "%s hasn't arrived. Waiting %s seconds." % (filesTarget, wait_time)
+            fbFile = check_file(rdMain['GTM_APPS_ES_S3_ACCESS_KEY'],rdMain['GTM_APPS_ES_S3_SECRET_KEY'],rdMain['GTM_APPS_ES_S3_BUCKET'])
+            x = filesTarget == fbFile
+            time.sleep(wait_time)
+
         es_write_log("info", "Download file backup to aws S3 ...")
         s3.download_file(rdMain['GTM_APPS_ES_S3_BUCKET'], GTM_APPS_ES_FILE_RESTORE , rdMain['GTM_APPS_ES_BACKUPDIR']+"/"+GTM_APPS_ES_FILE_RESTORE)
         es_write_log("info", "Downloading S3 done ...")
@@ -119,7 +154,7 @@ def do_restore(host, port, fileConfig):
         es_write_log("info", "Trying to extract snapshots ...")
         check_call(["sudo", "tar", "-xf",rdMain['GTM_APPS_ES_BACKUPDIR']+"/"+rdMain['GTM_APPS_ES_REPONAME']+"_"+datetime.now().strftime("%Y%m%d")+".tar.gz", "-P"])
 
-        es = Elasticsearch([{'host': host, 'port': port, 'timeout': 500}])
+        es = Elasticsearch([{'host': host, 'port': port, 'timeout': 7200}])
 
         indx = ['news','promotion_suggestions','coupon_suggestions','store_details','stores','store_suggestions','malls','promotions','coupons','activities','news_suggestions','mall_suggestions']
         for x in indx:
@@ -133,6 +168,9 @@ def do_restore(host, port, fileConfig):
             es_write_log("info", "Remove local download file")
             check_call(["sudo", "rm", "-f",rdMain['GTM_APPS_ES_BACKUPDIR']+"/"+GTM_APPS_ES_FILE_RESTORE])
             es_write_log("info", "Service restore Stopped ...")
+            es_write_log("info", "Trying restarting Elasticsearch ...")
+            check_call(["sudo", "service", "elasticsearch","restart"])
+            es_write_log("info", "Restarting Elasticsearch done ...")
 
         except Exception as e:
             es_write_log("error",e)
